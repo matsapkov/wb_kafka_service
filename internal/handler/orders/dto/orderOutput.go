@@ -1,10 +1,14 @@
 package dto
 
-import "github.com/google/uuid"
+import (
+	"encoding/json"
+	"time"
+)
 
 type OutputDto struct {
-	Id uuid.UUID
-
-	//Остальные поля
-
+	OrderUID    string          `json:"order_uid"`
+	TrackNumber string          `json:"track_number"`
+	DateCreated time.Time       `json:"date_created"`
+	Payload     json.RawMessage `json:"payload"`
+	UpdatedAt   time.Time       `json:"updated_at"`
 }

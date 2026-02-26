@@ -3,14 +3,18 @@ package orders
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/matsapkov/wb_kafka_service/internal/models"
+	"log"
+	"time"
 )
 
 type OrdersRepository interface {
 	GetOrder(ctx context.Context, Id string) (models.Order, error)
 	ListRecent(ctx context.Context, limit int) ([]models.Order, error)
+	SaveOrder(ctx context.Context, orderUID, trackNumber string, dateCreated, updatedAt time.Time, payload json.RawMessage) error
 }
 
 type PostgresOrders struct {
@@ -81,4 +85,18 @@ func (p *PostgresOrders) ListRecent(ctx context.Context, limit int) ([]models.Or
 	}
 
 	return orders, nil
+}
+
+func (p *PostgresOrders) SaveOrder(ctx context.Context, orderUID, trackNumber string, dateCreated, updatedAt time.Time, payload json.RawMessage) error {
+	query := `INSERT INTO orders (order_uid, track_number, date_created, payload, updated_at)
+			  VALUES ($1, $2, $3, $4, $5)`
+
+	_, err := p.db.ExecContext(ctx, query, orderUID, trackNumber, dateCreated, payload, updatedAt)
+	if err != nil {
+		log.Printf("Ошибка сохранения заказа: %v", err)
+		return err
+	}
+
+	log.Printf("Заказ %s успешно сохранен", orderUID)
+	return nil
 }

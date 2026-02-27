@@ -2,28 +2,43 @@ package kafka
 
 import (
 	"context"
-	"github.com/segmentio/kafka-go"
+	"fmt"
 	"log"
+
+	"github.com/segmentio/kafka-go"
 )
 
 type KafkaProducer struct {
 	writer *kafka.Writer
 }
 
-func NewKafkaProducer(brokers []string) (*KafkaProducer, error) {
-	writer := &kafka.Writer{
-		Addr:     kafka.TCP(brokers...),
-		Topic:    "orders",
-		Balancer: &kafka.LeastBytes{},
+func NewKafkaProducer(brokers []string, topic string) (*KafkaProducer, error) {
+	if len(brokers) == 0 {
+		return nil, fmt.Errorf("brokers list cannot be empty")
 	}
 
-	return &KafkaProducer{
-		writer: writer,
-	}, nil
+	log.Printf("Создаётся producer с brokers: %v, topic: %s", brokers, topic)
+
+	writer := &kafka.Writer{
+		Addr:         kafka.TCP(brokers...),
+		Topic:        topic,
+		Balancer:     &kafka.LeastBytes{},
+		Async:        false,
+		RequiredAcks: kafka.RequireOne,
+	}
+
+	if err := writer.WriteMessages(context.Background(),
+		kafka.Message{Value: []byte("healthcheck")},
+	); err != nil {
+		writer.Close()
+		return nil, fmt.Errorf("cannot connect to kafka: %w", err)
+	}
+
+	return &KafkaProducer{writer: writer}, nil
 }
 
-func (kp *KafkaProducer) SendMessage(message []byte) error {
-	err := kp.writer.WriteMessages(context.Background(),
+func (kp *KafkaProducer) SendMessage(ctx context.Context, message []byte) error {
+	err := kp.writer.WriteMessages(ctx,
 		kafka.Message{
 			Value: message,
 		},
@@ -33,6 +48,10 @@ func (kp *KafkaProducer) SendMessage(message []byte) error {
 		return err
 	}
 
-	log.Println("Сообщение успешно отправлено в Kafka")
+	log.Printf("Сообщение успешно отправлено в Kafka: %s", string(message))
 	return nil
+}
+
+func (kp *KafkaProducer) Close() error {
+	return kp.writer.Close()
 }

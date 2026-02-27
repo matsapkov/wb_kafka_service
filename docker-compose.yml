@@ -4,11 +4,11 @@ services:
     env_file:
       - .env
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-orders}
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pass}
     ports:
-      - "5432:5432"
+      - "5433:5432"               
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -18,37 +18,54 @@ services:
       retries: 10
 
   kafka:
-    image: bitnami/kafka:3.7
-    environment:
-      KAFKA_CFG_NODE_ID: 1
-      KAFKA_CFG_PROCESS_ROLES: broker,controller
-      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
-      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      ALLOW_PLAINTEXT_LISTENER: "yes"
+    image: apache/kafka:latest
+    container_name: kafka
     ports:
       - "9092:9092"
+      - "9093:9093"  # controller listener, полезно экспонировать
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 1               # по умолчанию, но явно
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    volumes:
+      - kafka-data:/var/lib/kafka/data     # сохраняем метаданные между перезапусками
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9092 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s   # увеличь до 60–90s, KRaft иногда долго стартует в первый раз
 
   app:
     build: .
     env_file:
       - .env
     environment:
-      DB_DSN: ${DB_DSN}
-      HTTP_ADDR: ${HTTP_ADDR}
-      KAFKA_BROKERS: ${KAFKA_BROKERS}
-      KAFKA_TOPIC: ${KAFKA_TOPIC}
-      KAFKA_GROUP: ${KAFKA_GROUP}
+      DB_DSN: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+      HTTP_ADDR: ":8081"
+      KAFKA_BROKERS: "kafka:9092"
+      KAFKA_TOPIC: "orders"
+      KAFKA_GROUP: "order-service-group"
     ports:
       - "8081:8081"
     depends_on:
       postgres:
         condition: service_healthy
       kafka:
-        condition: service_started
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:
+  kafka-data:

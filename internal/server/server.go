@@ -2,11 +2,14 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"github.com/matsapkov/wb_kafka_service/internal/cache"
 	"github.com/matsapkov/wb_kafka_service/internal/config/postgres"
+	"github.com/matsapkov/wb_kafka_service/internal/kafka"
 	"github.com/matsapkov/wb_kafka_service/internal/router"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	ordersHandler "github.com/matsapkov/wb_kafka_service/internal/handler/orders"
@@ -47,6 +50,22 @@ func NewServer() (*Server, error) {
 	}
 
 	mux := router.NewRouter(orderHandler)
+	brokers := []string{os.Getenv("KAFKA_BROKERS")}
+	topic := os.Getenv("KAFKA_TOPIC")
+
+	consumer, err := kafka.NewKafkaConsumer(brokers, topic, orderRepo, cache)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kafka consumer: %w", err)
+	}
+
+	consumerCtx, cancel := context.WithCancel(context.Background())
+	go consumer.StartConsuming(consumerCtx)
+
+	go func() {
+		<-consumerCtx.Done()
+		log.Println("Shutting down kafka consumer...")
+		cancel()
+	}()
 
 	server := http.Server{
 		Addr:         ":8081",

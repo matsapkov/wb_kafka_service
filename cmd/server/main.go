@@ -1,14 +1,32 @@
 package main
 
 import (
-	"github.com/matsapkov/wb_kafka_service/internal/server"
+	"context"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/matsapkov/wb_kafka_service/internal/app"
+	"github.com/matsapkov/wb_kafka_service/internal/config"
 )
 
 func main() {
-	s, err := server.NewServer()
+	cfg, err := config.Load()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("load config: %v", err)
 	}
-	s.StartServer()
+
+	application, err := app.New(cfg)
+	if err != nil {
+		log.Fatalf("create app: %v", err)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	if err := application.Start(ctx); err != nil {
+		log.Printf("app stopped with error: %v", err)
+		os.Exit(1)
+	}
 }

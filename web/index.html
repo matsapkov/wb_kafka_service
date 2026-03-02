@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Order Lookup</title>
+  <style>
+    :root {
+      --bg: linear-gradient(140deg, #f2f7ff 0%, #fdf7f0 100%);
+      --panel: #ffffff;
+      --text: #1f2430;
+      --accent: #136f63;
+      --danger: #b00020;
+      --border: #dde4ef;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      padding: 16px;
+    }
+
+    .panel {
+      width: min(900px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 14px 32px rgba(22, 40, 69, 0.12);
+    }
+
+    h1 { margin: 0 0 12px; font-size: 28px; }
+
+    form { display: flex; gap: 8px; margin-bottom: 12px; }
+
+    input {
+      flex: 1;
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 16px;
+    }
+
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 10px 14px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    pre {
+      margin: 0;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 10px;
+      padding: 14px;
+      overflow: auto;
+      min-height: 220px;
+    }
+
+    .error { color: var(--danger); min-height: 20px; }
+  </style>
+</head>
+<body>
+  <section class="panel">
+    <h1>Просмотр заказа</h1>
+    <form id="order-form">
+      <input id="order-id" placeholder="Введите order_uid" required />
+      <button type="submit">Найти</button>
+    </form>
+    <div id="error" class="error"></div>
+    <pre id="result">Ожидание запроса...</pre>
+  </section>
+
+  <script>
+    const form = document.getElementById("order-form");
+    const orderInput = document.getElementById("order-id");
+    const errorEl = document.getElementById("error");
+    const resultEl = document.getElementById("result");
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      errorEl.textContent = "";
+      resultEl.textContent = "Загрузка...";
+
+      const id = orderInput.value.trim();
+      if (!id) {
+        errorEl.textContent = "order_uid обязателен";
+        resultEl.textContent = "";
+        return;
+      }
+
+      try {
+        const response = await fetch(`/order/${encodeURIComponent(id)}`);
+        const body = await response.json();
+
+        if (!response.ok) {
+          errorEl.textContent = body.error || `Ошибка: ${response.status}`;
+          resultEl.textContent = JSON.stringify(body, null, 2);
+          return;
+        }
+
+        resultEl.textContent = JSON.stringify(body, null, 2);
+      } catch (error) {
+        errorEl.textContent = error.message;
+        resultEl.textContent = "";
+      }
+    });
+  </script>
+</body>
+</html>

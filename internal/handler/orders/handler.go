@@ -3,21 +3,20 @@ package orders
 import (
 	"database/sql"
 	"errors"
-	"github.com/matsapkov/wb_kafka_service/internal/usecase/orders"
 	"net/http"
+
+	orderUsecase "github.com/matsapkov/wb_kafka_service/internal/usecase/orders"
 )
 
 type Handler struct {
-	Usecase orders.Usecase
+	usecase orderUsecase.Usecase
 }
 
-func NewOrderHandler(u orders.Usecase) *Handler {
-	return &Handler{
-		Usecase: u,
-	}
+func NewOrderHandler(u orderUsecase.Usecase) *Handler {
+	return &Handler{usecase: u}
 }
 
-func (h *Handler) HandlerError(err error) (int, string) {
+func (h *Handler) handlerError(err error) (int, string) {
 	switch {
 	case err == nil:
 		return http.StatusOK, ""

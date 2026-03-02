@@ -1,33 +1,30 @@
 package orders
 
 import (
-	"github.com/gorilla/mux"
-	"github.com/matsapkov/wb_kafka_service/pkg/json"
 	"net/http"
 
+	"github.com/gorilla/mux"
 	"github.com/matsapkov/wb_kafka_service/internal/handler/orders/dto"
+	"github.com/matsapkov/wb_kafka_service/pkg/json"
 )
 
 func (h *Handler) GetOrderHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	vars := mux.Vars(r)
-	orderId := vars["order_id"]
-
-	if orderId == "" {
+	orderID := mux.Vars(r)["order_id"]
+	if orderID == "" {
 		json.WriteError(w, http.StatusBadRequest, "order_id is required")
 		return
 	}
 
-	order, err := h.Usecase.GetOrder(ctx, orderId)
-
+	order, err := h.usecase.GetOrder(ctx, orderID)
 	if err != nil {
-		code, msg := h.HandlerError(err)
+		code, msg := h.handlerError(err)
 		json.WriteError(w, code, msg)
 		return
 	}
 
-	outputDto := &dto.OutputDto{
+	output := dto.OutputDto{
 		OrderUID:    order.OrderUID,
 		TrackNumber: order.TrackNumber,
 		DateCreated: order.DateCreated,
@@ -35,10 +32,7 @@ func (h *Handler) GetOrderHandler(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   order.UpdatedAt,
 	}
 
-	err = json.Write(w, http.StatusOK, outputDto)
-	if err != nil {
-		code, msg := h.HandlerError(err)
-		json.WriteError(w, code, msg)
-		return
+	if err := json.Write(w, http.StatusOK, output); err != nil {
+		json.WriteError(w, http.StatusInternalServerError, "failed to serialize response")
 	}
 }

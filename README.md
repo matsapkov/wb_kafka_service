@@ -1,24 +1,125 @@
-# WB L0: Сервис обработки заказов (Kafka + PostgreSQL + In-Memory Cache)
+﻿# WB School Task1: Order Service (Go + Kafka + PostgreSQL)
 
-**WB L0** — это учебный микросервис на Go, разработанный для демонстрации работы с брокером сообщений Apache Kafka, реляционной базой данных PostgreSQL и in-memory кэшированием. Сервис получает данные о заказах из Kafka, сохраняет их в БД и кэширует в памяти для обеспечения быстрого доступа через HTTP API.
+Demo microservice that:
+- consumes orders from Kafka,
+- validates incoming messages,
+- stores data in PostgreSQL using transactions,
+- caches orders in memory with TTL invalidation,
+- returns order data by `order_uid` over HTTP,
+- provides a simple web UI,
+- routes invalid messages to DLQ.
 
-## Функциональные требования
+## Architecture
 
-Проект реализован в соответствии со следующим техническим заданием:
+Components:
+- `cmd/server` - service entrypoint (HTTP + Kafka consumer)
+- `cmd/producer` - test data producer (valid + invalid messages)
+- `internal/app` - app wiring and startup
+- `internal/config` - unified env config package
+- `internal/kafka` - consumer, producer, DLQ writer
+- `internal/repository/orders` - PostgreSQL repository
+- `internal/cache` - in-memory TTL cache
+- `internal/usecase/orders` - business logic
+- `internal/validation` - incoming message validation
+- `internal/router` + `internal/handler` - HTTP API + UI
+- `internal/metrics` - Prometheus metrics
 
-1.  **База данных (PostgreSQL):**
-    *   Развертывание локального инстанса БД.
-    *   Создание схемы и таблиц для хранения данных заказа (доставка, оплата, товары).
-2.  **Сервис (Go-приложение):**
-    *   **Подписка на Kafka:** Чтение сообщений из указанного топика (JSON-объекты заказов).
-    *   **Валидация и сохранение:** Парсинг входящих данных, обработка ошибок (логирование некорректных сообщений) и атомарная запись в БД с использованием транзакций.
-    *   **In-Memory кэш:** Хранение полученных заказов в памяти (структура `map`/`sync.Map`) для быстрого доступа.
-    *   **Восстановление кэша:** При старте сервис автоматически заполняет кэш последними актуальными данными из базы данных.
-    *   **Обработка сбоев:** Обеспечение целостности данных с помощью транзакций БД и подтверждений (commit) сообщений от Kafka.
-3.  **Веб-сервер и API:**
-    *   **HTTP-эндпоинт:** `GET /order/{order_uid}` — возвращает JSON с данными заказа.
-    *   **Приоритизация данных:** Поиск заказа сначала в кэше, при отсутствии — в БД.
-4.  **Пользовательский интерфейс:**
-    *   Простая HTML-страница с полем ввода ID заказа и кнопкой.
-    *   Отображение информации о заказе после успешного ответа от API.
+Data flow:
+1. Producer sends JSON messages to Kafka topic `orders`.
+2. Consumer reads and validates messages.
+3. Valid message is saved to DB and put into cache.
+4. Invalid/failed message is published to `orders.dlq`.
+5. API `GET /order/{order_uid}` checks cache first, then DB.
 
+## Tech Stack
+
+- Go 1.23
+- PostgreSQL 16
+- Kafka (`confluentinc/cp-kafka:7.8.0`) + ZooKeeper
+- Docker Compose
+- Gorilla Mux
+- Prometheus client (`/metrics`)
+
+## Environment Variables
+
+Main variables in `.env`:
+- `DB_DSN`
+- `HTTP_ADDR`
+- `KAFKA_BROKERS`
+- `KAFKA_TOPIC`
+- `KAFKA_DLQ_TOPIC`
+- `KAFKA_GROUP`
+- `KAFKA_MIN_BYTES`
+- `KAFKA_MAX_BYTES`
+- `KAFKA_MAX_WAIT`
+- `CACHE_LIMIT`
+- `CACHE_TTL`
+- `CACHE_CLEANUP_INTERVAL`
+
+## Run
+
+1. Start infrastructure:
+```bash
+docker compose up -d --build
+```
+
+2. Send test messages:
+```bash
+go run ./cmd/producer -count 20 -invalid-percent 30
+```
+
+3. Check API:
+```bash
+curl http://localhost:8081/order/<order_uid>
+```
+
+4. Open UI:
+- `http://localhost:8081/`
+
+5. Check metrics:
+```bash
+curl http://localhost:8081/metrics
+```
+
+## Kafka and DLQ
+
+- Main topic: `orders`
+- DLQ topic: `orders.dlq`
+- `docker-compose` creates both topics using `kafka-init`
+- Failed messages get DLQ headers:
+  - `x-error-reason`
+  - `x-original-topic`
+  - `x-failed-at`
+
+## Tests and Lint
+
+```bash
+go test ./...
+golangci-lint run
+```
+
+## API
+
+### Get Order
+
+`GET /order/{order_uid}`
+
+Success (`200`):
+```json
+{
+  "order_uid": "order-123",
+  "track_number": "WB-000123",
+  "date_created": "2026-03-02T12:00:00Z",
+  "payload": {
+    "delivery": {},
+    "payment": {},
+    "items": []
+  },
+  "updated_at": "2026-03-02T12:00:00Z"
+}
+```
+
+Not found (`404`):
+```json
+{"error":"order not found"}
+```

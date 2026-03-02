@@ -4,76 +4,123 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
-	"os"
+	"math/rand"
 	"time"
 
+	"github.com/matsapkov/wb_kafka_service/internal/config"
 	"github.com/matsapkov/wb_kafka_service/internal/kafka"
 	"github.com/matsapkov/wb_kafka_service/internal/models"
 )
 
 func main() {
-	filePath := flag.String("file", "", "Path to JSON file with order data")
-	count := flag.Int("count", 1, "Number of test messages to send")
+	count := flag.Int("count", 10, "number of messages")
+	invalidPct := flag.Int("invalid-percent", 30, "percentage of invalid messages")
+	interval := flag.Duration("interval", 200*time.Millisecond, "delay between messages")
 	flag.Parse()
 
-	brokers := []string{"localhost:9092"}
-	topic := "orders"
-
-	producer, err := kafka.NewKafkaProducer(brokers, topic)
+	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to create producer: %v", err)
+		log.Fatalf("load config: %v", err)
 	}
-	defer producer.Close()
-	log.Printf("Используемые brokers перед вызовом: %v", brokers)
 
+	producer, err := kafka.NewProducer(cfg.Kafka.Brokers, cfg.Kafka.Topic)
+	if err != nil {
+		log.Fatalf("create producer: %v", err)
+	}
+	defer func() {
+		if err := producer.Close(); err != nil {
+			log.Printf("producer close error: %v", err)
+		}
+	}()
+
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	ctx := context.Background()
 
-	if *filePath != "" {
-		data, err := os.ReadFile(*filePath)
+	for i := 0; i < *count; i++ {
+		valid := r.Intn(100) >= *invalidPct
+		msg, err := generateMessage(r, valid)
 		if err != nil {
-			log.Fatalf("Failed to read file: %v", err)
-		}
-		err = producer.SendMessage(ctx, data)
-		if err != nil {
-			log.Fatalf("Failed to send: %v", err)
-		}
-		log.Println("Sent message from file")
-		return
-	}
-
-	for i := 1; i <= *count; i++ {
-		order := generateTestOrder(i)
-		data, err := json.Marshal(order)
-		if err != nil {
-			log.Printf("Marshal error: %v", err)
+			log.Printf("generate message error: %v", err)
 			continue
 		}
 
-		err = producer.SendMessage(ctx, data)
-		if err != nil {
-			log.Printf("Send error: %v", err)
+		if err := producer.SendMessage(ctx, msg); err != nil {
+			log.Printf("send message error: %v", err)
 			continue
 		}
-
-		time.Sleep(time.Millisecond * 500)
+		log.Printf("sent message #%d valid=%t", i+1, valid)
+		time.Sleep(*interval)
 	}
-
-	log.Printf("Sent %d test messages", *count)
 }
 
-func generateTestOrder(num int) models.Order {
-	return models.Order{
-		OrderUID:    "test-order-" + string(rune('A'+num-1)),
-		TrackNumber: "TN-TEST-" + string(rune('0'+num)),
-		DateCreated: time.Now().Add(-time.Hour * time.Duration(num)),
-		UpdatedAt:   time.Now(),
-		Payload: json.RawMessage(`{
-			"delivery": {"name": "Test User ` + string(rune('A'+num-1)) + `", "phone": "+1234567890", "zip": "12345", "city": "Test City", "address": "Test Address", "region": "Test Region", "email": "test@example.com"},
-			"payment": {"transaction": "trans-` + string(rune('0'+num)) + `", "currency": "USD", "provider": "test-provider", "amount": 100` + string(rune('0'+num)) + `, "payment_dt": 1234567890, "bank": "test-bank", "delivery_cost": 500, "goods_total": 9500, "custom_fee": 0},
-			"items": [
-				{"chrt_id": 12345` + string(rune('0'+num)) + `, "track_number": "TN-TEST-` + string(rune('0'+num)) + `", "price": 1000, "rid": "rid-` + string(rune('0'+num)) + `", "name": "Test Item ` + string(rune('A'+num-1)) + `", "sale": 10, "size": "M", "total_price": 900, "nm_id": 98765, "brand": "Test Brand", "status": 1}
-			]
-		}`),
+func generateMessage(r *rand.Rand, valid bool) ([]byte, error) {
+	if !valid {
+		switch r.Intn(3) {
+		case 0:
+			return []byte("{not-json"), nil
+		case 1:
+			order, err := generateOrder(r)
+			if err != nil {
+				return nil, err
+			}
+			order.OrderUID = ""
+			return json.Marshal(order)
+		default:
+			order, err := generateOrder(r)
+			if err != nil {
+				return nil, err
+			}
+			order.Payload = json.RawMessage(`{"delivery":{},"payment":{},"items":[]}`)
+			return json.Marshal(order)
+		}
 	}
+
+	order, err := generateOrder(r)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(order)
+}
+
+func generateOrder(r *rand.Rand) (models.Order, error) {
+	now := time.Now().UTC()
+	uid := fmt.Sprintf("order-%d", now.UnixNano()+int64(r.Intn(1000)))
+	track := fmt.Sprintf("WB-%06d", r.Intn(1_000_000))
+
+	payload := map[string]any{
+		"delivery": map[string]any{
+			"name":    fmt.Sprintf("User %d", r.Intn(1000)),
+			"phone":   "+79991234567",
+			"city":    "Moscow",
+			"address": "Lenina 1",
+			"email":   fmt.Sprintf("user%d@example.com", r.Intn(1000)),
+		},
+		"payment": map[string]any{
+			"transaction": fmt.Sprintf("tx-%d", now.UnixNano()),
+			"currency":    "RUB",
+			"amount":      1000 + r.Intn(10000),
+		},
+		"items": []map[string]any{
+			{
+				"track_number": track,
+				"name":         "Demo item",
+				"price":        100 + r.Intn(1000),
+			},
+		},
+	}
+
+	payloadRaw, err := json.Marshal(payload)
+	if err != nil {
+		return models.Order{}, fmt.Errorf("marshal payload: %w", err)
+	}
+
+	return models.Order{
+		OrderUID:    uid,
+		TrackNumber: track,
+		DateCreated: now,
+		Payload:     payloadRaw,
+		UpdatedAt:   now,
+	}, nil
 }

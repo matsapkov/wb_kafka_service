@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-func Read(r *http.Request, v interface{}) error {
+func Read(r *http.Request, v any) error {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return err
@@ -14,7 +14,7 @@ func Read(r *http.Request, v interface{}) error {
 	return json.Unmarshal(body, v)
 }
 
-func Write(w http.ResponseWriter, status int, v interface{}) error {
+func Write(w http.ResponseWriter, status int, v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -29,7 +29,11 @@ func WriteError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 
-	resp := map[string]string{"error": msg}
-	data, _ := json.Marshal(resp)
-	w.Write(data)
+	data, err := json.Marshal(map[string]string{"error": msg})
+	if err != nil {
+		_, _ = w.Write([]byte(`{"error":"internal server error"}`))
+		return
+	}
+
+	_, _ = w.Write(data)
 }
